@@ -399,13 +399,12 @@ get-KERNEL_CC() {
 
 # @FUNCTION: sign_module
 # @DESCRIPTION:
-# Sign a kernel module
-# @USAGE: <file>
+# Sign a kernel module if enabled and supported, or just silently ignore the request and do nothing.
+# @USAGE: <filename>
 sign_module() {
 	debug-print-function ${FUNCNAME} $*
 
 	if use module-sign; then
-		
 		local sig_hash sig_pem sig_x509 modulename
 		sig_hash=$(linux_chkconfig_string MODULE_SIG_HASH)
 		sig_pem="${KV_DIR}/certs/signing_key.pem"
@@ -651,7 +650,7 @@ linux-mod_pkg_setup() {
 	# External modules use kernel symbols (bug #591832)
 	CONFIG_CHECK+=" !TRIM_UNUSED_KSYMS"
 
-	# if signing is requested, check if kernel actually supports it
+	# if signature is requested, check if kernel actually supports it
 	use module-sign && CONFIG_CHECK+=" MODULE_SIG"
 
 	linux-info_pkg_setup;
@@ -660,6 +659,7 @@ linux-mod_pkg_setup() {
 	strip_modulenames;
 	[[ -n ${MODULE_NAMES} ]] && check_modules_supported
 	set_kvobj;
+	use module-sign && export STRIP_MASK="*.${KV_OBJ}";
 	check_sig_force;
 	# Commented out with permission from johnm until a fixed version for arches
 	# who intentionally use different kernel and userland compilers can be
