@@ -770,7 +770,6 @@ linux-mod_src_install() {
 			"${KERNEL_MODULE_SIG_PEM:-${sig_pem}}" \
 			"${KERNEL_MODULE_SIG_X509:-${sig_x509}}" \
 			"${modulename}.${KV_OBJ}" || die "Signing ${modulename}.${KV_OBJ} failed"
-			echo "${KERNEL_MODULE_SIG_HASH:-${sig_hash//\"/}}" "${KERNEL_MODULE_SIG_PEM:-${sig_pem}}" "${KERNEL_MODULE_SIG_X509:-${sig_x509}}"
 			cd "${OLDPWD}" || die
 		fi
 
