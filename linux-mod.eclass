@@ -1,6 +1,5 @@
 # Copyright 1999-2016 Gentoo Foundation
 # Distributed under the terms of the GNU General Public License v2
-# REMOVEME https://bugs.gentoo.org/447352
 
 # @ECLASS: linux-mod.eclass
 # @MAINTAINER:
@@ -15,7 +14,7 @@
 # required to install external modules against a kernel source
 # tree.
 
-# A Couple of env vars are available to effect usage of this eclass
+# Several env vars are available to effect usage of this eclass
 # These are as follows:
 
 # @ECLASS-VARIABLE: MODULES_OPTIONAL_USE
@@ -133,6 +132,28 @@
 # @DESCRIPTION:
 # It's a read-only variable. It contains the extension of the kernel modules.
 
+# @ECLASS-VARIABLE: KERNEL_MODULE_SIG_HASH
+# @DESCRIPTION:
+# A string to control signing algorithm
+# Possible values: sha1:sha224:sha256:sha384:sha512
+# Defaults to value extracted from .config
+# Can be set by user in make.conf, as it can differ from kernel's.
+# In case of overriding this it's users responsibility to make sure
+# that kernel supports desired hash algo
+
+# @ECLASS-VARIABLE: KERNEL_MODULE_SIG_PEM
+# @DESCRIPTION:
+# A string, containing path to the private key filename or PKCS#11 URI
+# Defaults to ${KV_DIR}/certs/signing_key.pem} if unset.
+# Can be set by user in make.conf
+
+# @ECLASS-VARIABLE: KERNEL_MODULE_SIG_X509
+# @DESCRIPTION:
+# A string, containing path to the public key filename
+# Defaults to ${KV_DIR}/certs/signing_key.x509} if unset.
+# Can be set by user in make.conf
+
+
 inherit eutils linux-info multilib
 EXPORT_FUNCTIONS pkg_setup pkg_preinst pkg_postinst src_install src_compile pkg_postrm
 
@@ -145,12 +166,13 @@ esac
 	0) die "EAPI=${EAPI} is not supported with MODULES_OPTIONAL_USE_IUSE_DEFAULT due to lack of IUSE defaults" ;;
 esac
 
-IUSE="kernel_linux ${MODULES_OPTIONAL_USE:+${_modules_optional_use_iuse_default}}${MODULES_OPTIONAL_USE}"
+IUSE="module-sign kernel_linux ${MODULES_OPTIONAL_USE:+${_modules_optional_use_iuse_default}}${MODULES_OPTIONAL_USE}"
 SLOT="0"
 RDEPEND="${MODULES_OPTIONAL_USE}${MODULES_OPTIONAL_USE:+? (} kernel_linux? ( virtual/modutils ) ${MODULES_OPTIONAL_USE:+)}"
 DEPEND="${RDEPEND}
     ${MODULES_OPTIONAL_USE}${MODULES_OPTIONAL_USE:+? (}
 	sys-apps/sed
+	module-sign? ( || ( dev-libs/openssl dev-libs/libressl ) )
 	kernel_linux? ( virtual/linux-sources )
 	${MODULES_OPTIONAL_USE:+)}"
 
@@ -194,6 +216,20 @@ check_vermagic() {
 		ewarn "To fix this either change the version of GCC you wish to use"
 		ewarn "to match the kernel, or recompile the kernel first."
 		die "GCC Version Mismatch."
+	fi
+}
+
+check_sig_force() {
+	debug-print-function ${FUNCNAME} $*
+
+	if linux_chkconfig_present MODULE_SIG_FORCE; then
+		if use !module-sign; then
+			ewarn ""
+			ewarn "Kernel requires all modules to be signed and verified"
+			ewarn "please enable USE=\"module-sign\""
+			ewarn "otherwise loading the module will fail"
+			die "signature required"
+		fi
 	fi
 }
 
@@ -584,12 +620,16 @@ linux-mod_pkg_setup() {
 	# External modules use kernel symbols (bug #591832)
 	CONFIG_CHECK+=" !TRIM_UNUSED_KSYMS"
 
+	# if signing is requested, check if kernel actually supports it
+	use module-sign && CONFIG_CHECK+=" MODULE_SIG"
+
 	linux-info_pkg_setup;
 	require_configured_kernel
 	check_kernel_built;
 	strip_modulenames;
 	[[ -n ${MODULE_NAMES} ]] && check_modules_supported
 	set_kvobj;
+	check_sig_force;
 	# Commented out with permission from johnm until a fixed version for arches
 	# who intentionally use different kernel and userland compilers can be
 	# introduced - Jason Wever <weeve@gentoo.org>, 23 Oct 2005
@@ -714,6 +754,25 @@ linux-mod_src_install() {
 		libdir=${libdir:-misc}
 		srcdir=${srcdir:-${S}}
 		objdir=${objdir:-${srcdir}}
+
+		if use module-sign; then
+			einfo "Signing ${modulename} module"
+			local sig_hash sig_pem sig_x509
+			sig_hash=$(linux_chkconfig_string MODULE_SIG_HASH)
+			sig_pem="${KV_DIR}/certs/signing_key.pem"
+			sig_x509="${KV_DIR}/certs/signing_key.x509"
+
+			[ -x "${KV_DIR}/scripts/sign-file" ] || die "sign-file not found or not executable"
+
+			cd "${objdir}" || die "${objdir} does not exist"
+			"${KV_DIR}"/scripts/sign-file \
+			"${KERNEL_MODULE_SIG_HASH:-${sig_hash//\"/}}" \
+			"${KERNEL_MODULE_SIG_PEM:-${sig_pem}}" \
+			"${KERNEL_MODULE_SIG_X509:-${sig_x509}}" \
+			"${modulename}.${KV_OBJ}" || die "Signing ${modulename}.${KV_OBJ} failed"
+			echo "${KERNEL_MODULE_SIG_HASH:-${sig_hash//\"/}}" "${KERNEL_MODULE_SIG_PEM:-${sig_pem}}" "${KERNEL_MODULE_SIG_X509:-${sig_x509}}"
+			cd "${OLDPWD}" || die
+		fi
 
 		einfo "Installing ${modulename} module"
 		cd "${objdir}" || die "${objdir} does not exist"
