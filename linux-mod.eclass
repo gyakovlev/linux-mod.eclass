@@ -133,6 +133,7 @@
 # It's a read-only variable. It contains the extension of the kernel modules.
 
 # @ECLASS-VARIABLE: KERNEL_MODULE_SIG_HASH
+# @DEFAULT_UNSET
 # @DESCRIPTION:
 # A string to control signing algorithm
 # Possible values: sha1:sha224:sha256:sha384:sha512
@@ -142,12 +143,14 @@
 # that kernel supports desired hash algo
 
 # @ECLASS-VARIABLE: KERNEL_MODULE_SIG_PEM
+# @DEFAULT_UNSET
 # @DESCRIPTION:
 # A string, containing path to the private key filename or PKCS#11 URI
 # Defaults to ${KV_DIR}/certs/signing_key.pem} if unset.
 # Can be set by user in make.conf
 
 # @ECLASS-VARIABLE: KERNEL_MODULE_SIG_X509
+# @DEFAULT_UNSET
 # @DESCRIPTION:
 # A string, containing path to the public key filename
 # Defaults to ${KV_DIR}/certs/signing_key.x509} if unset.
@@ -219,6 +222,11 @@ check_vermagic() {
 	fi
 }
 
+# @FUNCTION: check_sig_force
+# @INTERNAL
+# @DESCRIPTION:
+# Check if kernel requires module signing and die
+# if module is not going to be signed.
 check_sig_force() {
 	debug-print-function ${FUNCNAME} $*
 
@@ -389,6 +397,29 @@ get-KERNEL_CC() {
 	echo "${kernel_cc}"
 }
 
+# @FUNCTION: sign_module
+# @DESCRIPTION:
+# Sign a kernel module
+# @USAGE: <file>
+sign_module() {
+	debug-print-function ${FUNCNAME} $*
+
+	if use module-sign; then
+		
+		local sig_hash sig_pem sig_x509 modulename
+		sig_hash=$(linux_chkconfig_string MODULE_SIG_HASH)
+		sig_pem="${KV_DIR}/certs/signing_key.pem"
+		sig_x509="${KV_DIR}/certs/signing_key.x509"
+		modulename=$(basename "${1}")
+
+		einfo "Signing ${modulename}"
+		"${KV_DIR}"/scripts/sign-file \
+		"${KERNEL_MODULE_SIG_HASH:-${sig_hash//\"/}}" \
+		"${KERNEL_MODULE_SIG_PEM:-${sig_pem}}" \
+		"${KERNEL_MODULE_SIG_X509:-${sig_x509}}" \
+		"${1}" || die "Signing ${modulename} failed"
+	fi
+}
 # internal function
 #
 # FUNCTION:
@@ -755,31 +786,15 @@ linux-mod_src_install() {
 		srcdir=${srcdir:-${S}}
 		objdir=${objdir:-${srcdir}}
 
-		if use module-sign; then
-			einfo "Signing ${modulename} module"
-			local sig_hash sig_pem sig_x509
-			sig_hash=$(linux_chkconfig_string MODULE_SIG_HASH)
-			sig_pem="${KV_DIR}/certs/signing_key.pem"
-			sig_x509="${KV_DIR}/certs/signing_key.x509"
-
-			[ -x "${KV_DIR}/scripts/sign-file" ] || die "sign-file not found or not executable"
-
-			cd "${objdir}" || die "${objdir} does not exist"
-			"${KV_DIR}"/scripts/sign-file \
-			"${KERNEL_MODULE_SIG_HASH:-${sig_hash//\"/}}" \
-			"${KERNEL_MODULE_SIG_PEM:-${sig_pem}}" \
-			"${KERNEL_MODULE_SIG_X509:-${sig_x509}}" \
-			"${modulename}.${KV_OBJ}" || die "Signing ${modulename}.${KV_OBJ} failed"
-			cd "${OLDPWD}" || die
-		fi
-
 		einfo "Installing ${modulename} module"
 		cd "${objdir}" || die "${objdir} does not exist"
-		insinto /lib/modules/${KV_FULL}/${libdir}
-		doins ${modulename}.${KV_OBJ} || die "doins ${modulename}.${KV_OBJ} failed"
+		sign_module "${modulename}.${KV_OBJ}"
+		insinto /lib/modules/"${KV_FULL}/${libdir}"
+		doins "${modulename}.${KV_OBJ}" || die "doins ${modulename}.${KV_OBJ} failed"
 		cd "${OLDPWD}"
 
 		generate_modulesd "${objdir}/${modulename}"
+		
 	done
 }
 
