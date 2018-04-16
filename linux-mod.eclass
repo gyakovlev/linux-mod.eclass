@@ -132,30 +132,23 @@
 # @DESCRIPTION:
 # It's a read-only variable. It contains the extension of the kernel modules.
 
+# @ECLASS-VARIABLE: KERNEL_MODULE_SIG_KEY
+# @DEFAULT_UNSET
+# @DESCRIPTION:
+# A string, containing absolute path to the private key file.
+# Defaults to value of CONFIG_MODULE_SIG_KEY extracted from .config
+# Can be set by user in make.conf
+# Will auto-use ${KERNEL_MODULE_SIG_KEY/.pem/.x509} as a public key path.
+
 # @ECLASS-VARIABLE: KERNEL_MODULE_SIG_HASH
 # @DEFAULT_UNSET
 # @DESCRIPTION:
 # A string to control signing algorithm
-# Possible values: sha1:sha224:sha256:sha384:sha512
-# Defaults to value extracted from .config
-# Can be set by user in make.conf, as it can differ from kernel's.
-# In case of overriding this it's users responsibility to make sure
-# that kernel supports desired hash algo
-
-# @ECLASS-VARIABLE: KERNEL_MODULE_SIG_PEM
-# @DEFAULT_UNSET
-# @DESCRIPTION:
-# A string, containing path to the private key filename or PKCS#11 URI
-# Defaults to ${KV_DIR}/certs/signing_key.pem} if unset.
-# Can be set by user in make.conf
-
-# @ECLASS-VARIABLE: KERNEL_MODULE_SIG_X509
-# @DEFAULT_UNSET
-# @DESCRIPTION:
-# A string, containing path to the public key filename
-# Defaults to ${KV_DIR}/certs/signing_key.x509} if unset.
-# Can be set by user in make.conf
-
+# Possible values: { sha1 | sha224 | sha256 | sha384 | sha512 }
+# Defaults to value of CONFIG_MODULE_SIG_HASH extracted from .config
+# Can be set by user in make.conf and can differ from kernel's default.
+# In case of overriding this it's users responsibility to ensure
+# that kernel supports desired hash algo.
 
 inherit eutils linux-info multilib
 EXPORT_FUNCTIONS pkg_setup pkg_preinst pkg_postinst src_install src_compile pkg_postrm
@@ -229,7 +222,6 @@ check_vermagic() {
 # if module is not going to be signed.
 check_sig_force() {
 	debug-print-function ${FUNCNAME} $*
-
 	if linux_chkconfig_present MODULE_SIG_FORCE; then
 		if use !module-sign; then
 			ewarn ""
@@ -405,18 +397,45 @@ sign_module() {
 	debug-print-function ${FUNCNAME} $*
 
 	if use module-sign; then
-		local sig_hash sig_pem sig_x509 modulename
-		sig_hash=$(linux_chkconfig_string MODULE_SIG_HASH)
-		sig_pem="${KV_DIR}/certs/signing_key.pem"
-		sig_x509="${KV_DIR}/certs/signing_key.x509"
-		modulename=$(basename "${1}")
+		require_configured_kernel;
+		check_kernel_built;
 
-		einfo "Signing ${modulename}"
-		"${KV_DIR}"/scripts/sign-file \
-		"${KERNEL_MODULE_SIG_HASH:-${sig_hash//\"/}}" \
-		"${KERNEL_MODULE_SIG_PEM:-${sig_pem}}" \
-		"${KERNEL_MODULE_SIG_X509:-${sig_x509}}" \
-		"${1}" || die "Signing ${modulename} failed"
+		local dotconfig_sig_hash dotconfig_sig_key
+		local sign_file_bin_path sig_hash sig_key_path sig_x509_path
+		local filename
+
+		# extract values from kernel .config
+		# key path is relative, e.g. "certs/signing_key.pem"
+		dotconfig_sig_hash="$(linux_chkconfig_string MODULE_SIG_HASH)"
+		dotconfig_sig_key="$(linux_chkconfig_string MODULE_SIG_KEY)"
+
+		# strip out double quotes, sign-file binary chokes on them
+		dotconfig_sig_hash=${dotconfig_sig_hash//\"/}
+		dotconfig_sig_key=${dotconfig_sig_key//\"/}
+
+		sign_file_bin_path="${KV_OUT_DIR}/scripts/sign-file"
+		sig_hash="${KERNEL_MODULE_SIG_HASH:-${dotconfig_sig_hash}}" 
+		sig_key_path="${KERNEL_MODULE_SIG_KEY:-${KV_OUT_DIR}/${dotconfig_sig_key}}"
+		sig_x509_path="${sig_key_path/.pem/.x509}"
+
+		# some checks, because sign-file is dumb and produces cryptic errors
+		[ -e "${1}" ] || die "${1} not found or not readable"
+		[ -x "${sign_file_bin_path}" ] || die "${sign_file_bin_path} not found or not executable"
+		[ -e "${sig_key_path}" ] || die "Private key ${sig_key_path} not found or not readable"
+		[ -e "${sig_x509_path}" ] || die "Public key ${sig_x509_path} not found or not readable"
+		case "${sig_hash}" in
+			sha1|sha224|sha256|sha384|sha512)
+				;;
+			*)
+				die "Unsupported hash algo"
+				;;
+		esac
+		filename=$(basename "${1}")
+
+		einfo "Signing ${filename} using ${sig_key_path}:${sig_hash}"
+		"${sign_file_bin_path}" \
+			"${sig_hash}" "${sig_key_path}" "${sig_x509_path}" \
+			"${1}" || die "Signing ${filename} failed"
 	fi
 }
 # internal function
@@ -794,7 +813,6 @@ linux-mod_src_install() {
 		cd "${OLDPWD}"
 
 		generate_modulesd "${objdir}/${modulename}"
-		
 	done
 }
 
