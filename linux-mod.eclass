@@ -138,7 +138,10 @@
 # A string, containing absolute path to the private key file.
 # Defaults to value of CONFIG_MODULE_SIG_KEY extracted from .config
 # Can be set by user in make.conf
-# Will auto-use ${KERNEL_MODULE_SIG_KEY/.pem/.x509} as a public key path.
+# Example:
+# KERNEL_MODULE_SIG_KEY="/secure/location/keys/kernel.pem"
+# Assumes that "/secure/location/keys/kernel.x509" is a matching pubkey.
+
 
 # @ECLASS-VARIABLE: KERNEL_MODULE_SIG_HASH
 # @DEFAULT_UNSET
@@ -405,7 +408,7 @@ sign_module() {
 		local filename
 
 		# extract values from kernel .config
-		# key path is relative, e.g. "certs/signing_key.pem"
+		# extracted key path is not full, e.g. "certs/signing_key.pem"
 		dotconfig_sig_hash="$(linux_chkconfig_string MODULE_SIG_HASH)"
 		dotconfig_sig_key="$(linux_chkconfig_string MODULE_SIG_KEY)"
 
@@ -419,7 +422,7 @@ sign_module() {
 		sig_x509_path="${sig_key_path/.pem/.x509}"
 
 		# some checks, because sign-file is dumb and produces cryptic errors
-		[ -e "${1}" ] || die "${1} not found or not readable"
+		[ -w "${1}" ] || die "${1} not found or not writable"
 		[ -x "${sign_file_bin_path}" ] || die "${sign_file_bin_path} not found or not executable"
 		[ -e "${sig_key_path}" ] || die "Private key ${sig_key_path} not found or not readable"
 		[ -e "${sig_x509_path}" ] || die "Public key ${sig_x509_path} not found or not readable"
