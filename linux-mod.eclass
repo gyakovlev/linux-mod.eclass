@@ -408,15 +408,15 @@ sign_module() {
 	sig_key_path="${KERNEL_MODULE_SIG_KEY:-${KV_OUT_DIR}/${dotconfig_sig_key}}"
 	sig_x509_path="${sig_key_path/.pem/.x509}"
 
+	module=$(basename "${1%.${KV_OBJ}}")
+
 	# some checks, because sign-file is dumb and produces cryptic errors
 	[ -w "${1}" ] || die "${1} not found or not writable"
+	grep -qFL '~Module signature appended~' "${1}" && die "${module} already signed"
 	[ -x "${sign_binary_path}" ] || die "${sign_binary_path} not found or not executable"
 	[ -e "${sig_key_path}" ] || die "Private key ${sig_key_path} not found or not readable"
 	[ -e "${sig_x509_path}" ] || die "Public key ${sig_x509_path} not found or not readable"
 
-	module=$(basename "${1%.${KV_OBJ}}")
-
-	grep -qFL '~Module signature appended~' "${1}" && die "${module} already signed"
 	einfo "Signing ${module} using ${sig_key_path}:${dotconfig_sig_hash}"
 	"${sign_binary_path}" \
 		"${dotconfig_sig_hash}" "${sig_key_path}" "${sig_x509_path}" \
