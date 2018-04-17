@@ -142,17 +142,6 @@
 # KERNEL_MODULE_SIG_KEY="/secure/location/keys/kernel.pem"
 # Assumes that "/secure/location/keys/kernel.x509" is a matching pubkey.
 
-
-# @ECLASS-VARIABLE: KERNEL_MODULE_SIG_HASH
-# @DEFAULT_UNSET
-# @DESCRIPTION:
-# A string to control signing algorithm
-# Possible values: { sha1 | sha224 | sha256 | sha384 | sha512 }
-# Defaults to value of CONFIG_MODULE_SIG_HASH extracted from .config
-# Can be set by user in make.conf and can differ from kernel's default.
-# In case of overriding this it's users responsibility to ensure
-# that kernel supports desired hash algo.
-
 inherit eutils linux-info multilib
 EXPORT_FUNCTIONS pkg_setup pkg_preinst pkg_postinst src_install src_compile pkg_postrm
 
@@ -215,24 +204,6 @@ check_vermagic() {
 		ewarn "To fix this either change the version of GCC you wish to use"
 		ewarn "to match the kernel, or recompile the kernel first."
 		die "GCC Version Mismatch."
-	fi
-}
-
-# @FUNCTION: check_sig_force
-# @INTERNAL
-# @DESCRIPTION:
-# Check if kernel requires module signing and die
-# if module is not going to be signed.
-check_sig_force() {
-	debug-print-function ${FUNCNAME} $*
-	if linux_chkconfig_present MODULE_SIG_FORCE; then
-		if use !module-sign; then
-			ewarn ""
-			ewarn "Kernel requires all modules to be signed and verified"
-			ewarn "please enable USE=\"module-sign\""
-			ewarn "otherwise loading the module will fail"
-			die "signature required"
-		fi
 	fi
 }
 
@@ -392,55 +363,100 @@ get-KERNEL_CC() {
 	echo "${kernel_cc}"
 }
 
-# @FUNCTION: sign_module
+# @FUNCTION: check_sig_force
+# @INTERNAL
 # @DESCRIPTION:
-# Sign a kernel module if enabled and supported, or just silently ignore the request and do nothing.
+# Check if kernel requires module signing and die
+# if module is not going to be signed.
+check_sig_force() {
+	debug-print-function ${FUNCNAME} $*
+
+	if linux_chkconfig_present MODULE_SIG_FORCE; then
+		if use !module-sign; then
+			ewarn "kernel .config has MODULE_SIG_FORCE=y option set"
+			ewarn "This means that kernel requires all modules"
+			ewarn "to be signed and verified before loading"
+			ewarn "please enable USE=\"module-sign\" or reconfigure your kernel"
+			ewarn "otherwise loading the module will fail"
+			die "signature required"
+		fi
+	fi
+}
+
+# @FUNCTION: sign_module
+# @INTERNAL
+# @DESCRIPTION:
+# Sign a kernel module
 # @USAGE: <filename>
 sign_module() {
 	debug-print-function ${FUNCNAME} $*
 
-	if use module-sign; then
-		require_configured_kernel;
-		check_kernel_built;
+	local dotconfig_sig_hash dotconfig_sig_key
+	local sign_binary_path sig_key_path sig_x509_path
+	local module
 
-		local dotconfig_sig_hash dotconfig_sig_key
-		local sign_file_bin_path sig_hash sig_key_path sig_x509_path
-		local filename
+	# extract values from kernel .config
+	# extracted key path is not full, e.g. "certs/signing_key.pem"
+	dotconfig_sig_hash="$(linux_chkconfig_string MODULE_SIG_HASH)"
+	dotconfig_sig_key="$(linux_chkconfig_string MODULE_SIG_KEY)"
 
-		# extract values from kernel .config
-		# extracted key path is not full, e.g. "certs/signing_key.pem"
-		dotconfig_sig_hash="$(linux_chkconfig_string MODULE_SIG_HASH)"
-		dotconfig_sig_key="$(linux_chkconfig_string MODULE_SIG_KEY)"
+	# strip out double quotes, sign-file binary chokes on them
+	dotconfig_sig_hash=${dotconfig_sig_hash//\"/}
+	dotconfig_sig_key=${dotconfig_sig_key//\"/}
 
-		# strip out double quotes, sign-file binary chokes on them
-		dotconfig_sig_hash=${dotconfig_sig_hash//\"/}
-		dotconfig_sig_key=${dotconfig_sig_key//\"/}
+	sign_binary_path="${KV_OUT_DIR}/scripts/sign-file"
+	sig_key_path="${KERNEL_MODULE_SIG_KEY:-${KV_OUT_DIR}/${dotconfig_sig_key}}"
+	sig_x509_path="${sig_key_path/.pem/.x509}"
 
-		sign_file_bin_path="${KV_OUT_DIR}/scripts/sign-file"
-		sig_hash="${KERNEL_MODULE_SIG_HASH:-${dotconfig_sig_hash}}" 
-		sig_key_path="${KERNEL_MODULE_SIG_KEY:-${KV_OUT_DIR}/${dotconfig_sig_key}}"
-		sig_x509_path="${sig_key_path/.pem/.x509}"
+	# some checks, because sign-file is dumb and produces cryptic errors
+	[ -w "${1}" ] || die "${1} not found or not writable"
+	[ -x "${sign_binary_path}" ] || die "${sign_binary_path} not found or not executable"
+	[ -e "${sig_key_path}" ] || die "Private key ${sig_key_path} not found or not readable"
+	[ -e "${sig_x509_path}" ] || die "Public key ${sig_x509_path} not found or not readable"
 
-		# some checks, because sign-file is dumb and produces cryptic errors
-		[ -w "${1}" ] || die "${1} not found or not writable"
-		[ -x "${sign_file_bin_path}" ] || die "${sign_file_bin_path} not found or not executable"
-		[ -e "${sig_key_path}" ] || die "Private key ${sig_key_path} not found or not readable"
-		[ -e "${sig_x509_path}" ] || die "Public key ${sig_x509_path} not found or not readable"
-		case "${sig_hash}" in
-			sha1|sha224|sha256|sha384|sha512)
-				;;
-			*)
-				die "Unsupported hash algo"
-				;;
-		esac
-		filename=$(basename "${1}")
+	module=$(basename "${1%.${KV_OBJ}}")
 
-		einfo "Signing ${filename} using ${sig_key_path}:${sig_hash}"
-		"${sign_file_bin_path}" \
-			"${sig_hash}" "${sig_key_path}" "${sig_x509_path}" \
-			"${1}" || die "Signing ${filename} failed"
+	einfo "Signing ${module} using ${sig_key_path}:${dotconfig_sig_hash}"
+	"${sign_binary_path}" \
+		"${dotconfig_sig_hash}" "${sig_key_path}" "${sig_x509_path}" \
+		"${1}" || die "Signing ${module} failed"
+}
+
+# @FUNCTION: sign_all_modules
+# @INTERNAL
+# @DESCRIPTION:
+# Signs all unsigned modules
+# Must be called in pkg_postinst, after linux-mod_modules_savelist
+sign_all_modules() {
+	debug-print-function ${FUNCNAME} $*
+
+	require_configured_kernel;
+	check_kernel_built;
+
+	local module
+	if [[ -n ${LINUX_MOD_ECLASS_MODULES} ]]; then
+		for module in ${LINUX_MOD_ECLASS_MODULES}; do
+		sign_module "${EPREFIX}/${module}"
+		done
+	else
+		ewarn 'QA: list of modules to sign is empty, pease report a bug'
 	fi
 }
+
+# @FUNCTION: linux-mod_modules_savelist
+# @DESCRIPTION:
+# Find the linux kernel modules to be installed and save their locations in the
+# LINUX_MOD_ECLASS_MODULES environment variable.
+# This function should be called from pkg_preinst.
+
+linux-mod_modules_savelist() {
+	debug-print-function ${FUNCNAME} $*
+
+	pushd "${ED}" > /dev/null || die
+	LINUX_MOD_ECLASS_MODULES=$(find "lib/modules/${KV_FULL}" -name "*.${KV_OBJ}" 2>/dev/null)
+	popd > /dev/null || die
+}
+
 # internal function
 #
 # FUNCTION:
@@ -681,7 +697,6 @@ linux-mod_pkg_setup() {
 	strip_modulenames;
 	[[ -n ${MODULE_NAMES} ]] && check_modules_supported
 	set_kvobj;
-	use module-sign && export STRIP_MASK="*.${KV_OBJ}";
 	check_sig_force;
 	# Commented out with permission from johnm until a fixed version for arches
 	# who intentionally use different kernel and userland compilers can be
@@ -810,7 +825,6 @@ linux-mod_src_install() {
 
 		einfo "Installing ${modulename} module"
 		cd "${objdir}" || die "${objdir} does not exist"
-		sign_module "${modulename}.${KV_OBJ}"
 		insinto /lib/modules/"${KV_FULL}/${libdir}"
 		doins "${modulename}.${KV_OBJ}" || die "doins ${modulename}.${KV_OBJ} failed"
 		cd "${OLDPWD}"
@@ -828,18 +842,22 @@ linux-mod_pkg_preinst() {
 
 	[ -d "${D}lib/modules" ] && UPDATE_DEPMOD=true || UPDATE_DEPMOD=false
 	[ -d "${D}lib/modules" ] && UPDATE_MODULEDB=true || UPDATE_MODULEDB=false
+	use module-sign && linux-mod_modules_savelist
 }
 
 # @FUNCTION: linux-mod_pkg_postinst
 # @DESCRIPTION:
 # It executes /sbin/depmod and adds the package to the /var/lib/module-rebuild/moduledb
 # database (if ${D}/lib/modules is created)"
+# Also checks is modules need to be signed
 linux-mod_pkg_postinst() {
 	debug-print-function ${FUNCNAME} $*
 	[ -n "${MODULES_OPTIONAL_USE}" ] && use !${MODULES_OPTIONAL_USE} && return
 
 	${UPDATE_DEPMOD} && update_depmod;
 	${UPDATE_MODULEDB} && update_moduledb;
+	check_sig_force; # just in case pkg_setup was not run
+	use module-sign && sign_all_modules;
 }
 
 # @FUNCTION: linux-mod_pkg_postrm
