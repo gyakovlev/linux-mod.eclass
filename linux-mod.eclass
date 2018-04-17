@@ -416,6 +416,7 @@ sign_module() {
 
 	module=$(basename "${1%.${KV_OBJ}}")
 
+	grep -qFL '~Module signature appended~' "${1}" && die "${module} already signed"
 	einfo "Signing ${module} using ${sig_key_path}:${dotconfig_sig_hash}"
 	"${sign_binary_path}" \
 		"${dotconfig_sig_hash}" "${sig_key_path}" "${sig_x509_path}" \
@@ -842,14 +843,14 @@ linux-mod_pkg_preinst() {
 
 	[ -d "${D}lib/modules" ] && UPDATE_DEPMOD=true || UPDATE_DEPMOD=false
 	[ -d "${D}lib/modules" ] && UPDATE_MODULEDB=true || UPDATE_MODULEDB=false
-	use module-sign && linux-mod_modules_savelist
+	linux-mod_modules_savelist
 }
 
 # @FUNCTION: linux-mod_pkg_postinst
 # @DESCRIPTION:
 # It executes /sbin/depmod and adds the package to the /var/lib/module-rebuild/moduledb
 # database (if ${D}/lib/modules is created)"
-# Also checks is modules need to be signed
+# Also signs modules if requested
 linux-mod_pkg_postinst() {
 	debug-print-function ${FUNCNAME} $*
 	[ -n "${MODULES_OPTIONAL_USE}" ] && use !${MODULES_OPTIONAL_USE} && return
