@@ -14,7 +14,7 @@
 # required to install external modules against a kernel source
 # tree.
 
-# Several env vars are available to effect usage of this eclass
+# A Couple of env vars are available to effect usage of this eclass
 # These are as follows:
 
 # @ECLASS-VARIABLE: MODULES_OPTIONAL_USE
@@ -427,34 +427,26 @@ sign_module() {
 # @INTERNAL
 # @DESCRIPTION:
 # Signs all unsigned modules
-# Must be called in pkg_postinst, after linux-mod_modules_savelist
+# Must be called in pkg_preinst.
 sign_all_modules() {
 	debug-print-function ${FUNCNAME} $*
 
+	[ -z "${KV_OBJ}" ] && set_kvobj;
 	require_configured_kernel;
 	check_kernel_built;
 
 	local module
-	if [[ -n ${LINUX_MOD_ECLASS_MODULES} ]]; then
-		for module in ${LINUX_MOD_ECLASS_MODULES}; do
-		sign_module "${EPREFIX}/${module}"
+	local modules
+
+	pushd "${ED}" > /dev/null || die
+	modules=$(find "lib/modules/${KV_FULL}" -name "*.${KV_OBJ}" 2>/dev/null)
+	if [[ -n ${modules} ]]; then
+		for module in ${modules}; do
+			sign_module "${module}"
 		done
 	else
 		ewarn 'QA: list of modules to sign is empty, pease report a bug'
 	fi
-}
-
-# @FUNCTION: linux-mod_modules_savelist
-# @DESCRIPTION:
-# Find the linux kernel modules to be installed and save their locations in the
-# LINUX_MOD_ECLASS_MODULES environment variable.
-# This function should be called from pkg_preinst.
-
-linux-mod_modules_savelist() {
-	debug-print-function ${FUNCNAME} $*
-
-	pushd "${ED}" > /dev/null || die
-	LINUX_MOD_ECLASS_MODULES=$(find "lib/modules/${KV_FULL}" -name "*.${KV_OBJ}" 2>/dev/null)
 	popd > /dev/null || die
 }
 
@@ -843,7 +835,8 @@ linux-mod_pkg_preinst() {
 
 	[ -d "${D}lib/modules" ] && UPDATE_DEPMOD=true || UPDATE_DEPMOD=false
 	[ -d "${D}lib/modules" ] && UPDATE_MODULEDB=true || UPDATE_MODULEDB=false
-	linux-mod_modules_savelist
+	check_sig_force
+	use module-sign && sign_all_modules
 }
 
 # @FUNCTION: linux-mod_pkg_postinst
@@ -857,8 +850,6 @@ linux-mod_pkg_postinst() {
 
 	${UPDATE_DEPMOD} && update_depmod;
 	${UPDATE_MODULEDB} && update_moduledb;
-	check_sig_force; # just in case pkg_setup was not run
-	use module-sign && sign_all_modules;
 }
 
 # @FUNCTION: linux-mod_pkg_postrm
