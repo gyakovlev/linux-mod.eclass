@@ -133,11 +133,11 @@
 # It's a read-only variable. It contains the extension of the kernel modules.
 
 # @ECLASS-VARIABLE: KERNEL_MODULE_SIG_KEY
+# @USER_VARIABLE
 # @DEFAULT_UNSET
 # @DESCRIPTION:
 # A string, containing absolute path to the private key file.
 # Defaults to value of CONFIG_MODULE_SIG_KEY extracted from .config
-# Can be set by user in make.conf
 # Example:
 # KERNEL_MODULE_SIG_KEY="/secure/location/keys/kernel.pem"
 # Assumes that "/secure/location/keys/kernel.x509" is a matching pubkey.
@@ -363,33 +363,33 @@ get-KERNEL_CC() {
 	echo "${kernel_cc}"
 }
 
-# @FUNCTION: check_sig_force
+# @FUNCTION: _check_sig_force
 # @INTERNAL
 # @DESCRIPTION:
 # Check if kernel requires module signing and die
 # if module is not going to be signed.
-check_sig_force() {
-	debug-print-function ${FUNCNAME} $*
+_check_sig_force() {
+	debug-print-function ${FUNCNAME} "${@}"
 
 	if linux_chkconfig_present MODULE_SIG_FORCE; then
 		if use !module-sign; then
-			ewarn "kernel .config has MODULE_SIG_FORCE=y option set"
-			ewarn "This means that kernel requires all modules"
-			ewarn "to be signed and verified before loading"
-			ewarn "please enable USE=\"module-sign\" or reconfigure your kernel"
-			ewarn "otherwise loading the module will fail"
+			eerror "kernel .config has MODULE_SIG_FORCE=y option set"
+			eerror "This means that kernel requires all modules"
+			eerror "to be signed and verified before loading"
+			eerror "please enable USE=\"module-sign\" or reconfigure your kernel"
+			eerror "otherwise loading the module will fail"
 			die "signature required"
 		fi
 	fi
 }
 
-# @FUNCTION: sign_module
+# @FUNCTION: _sign_module
 # @INTERNAL
+# @USAGE: <filename>
 # @DESCRIPTION:
 # Sign a kernel module
-# @USAGE: <filename>
-sign_module() {
-	debug-print-function ${FUNCNAME} $*
+_sign_module() {
+	debug-print-function ${FUNCNAME} "${@}"
 
 	local dotconfig_sig_hash dotconfig_sig_key
 	local sign_binary_path sig_key_path sig_x509_path
@@ -408,14 +408,14 @@ sign_module() {
 	sig_key_path="${KERNEL_MODULE_SIG_KEY:-${KV_OUT_DIR}/${dotconfig_sig_key}}"
 	sig_x509_path="${sig_key_path/.pem/.x509}"
 
-	module=$(basename "${1%.${KV_OBJ}}")
+	module=${1##*/}
 
 	# some checks, because sign-file is dumb and produces cryptic errors
-	[ -w "${1}" ] || die "${1} not found or not writable"
+	[[ -w "${1}" ]] || die "${1} not found or not writable"
 	grep -qFL '~Module signature appended~' "${1}" && die "${module} already signed"
-	[ -x "${sign_binary_path}" ] || die "${sign_binary_path} not found or not executable"
-	[ -e "${sig_key_path}" ] || die "Private key ${sig_key_path} not found or not readable"
-	[ -e "${sig_x509_path}" ] || die "Public key ${sig_x509_path} not found or not readable"
+	[[ -x "${sign_binary_path}" ]] || die "${sign_binary_path} not found or not executable"
+	[[ -r "${sig_key_path}" ]] || die "Private key ${sig_key_path} not found or not readable"
+	[[ -r "${sig_x509_path}" ]] || die "Public key ${sig_x509_path} not found or not readable"
 
 	einfo "Signing ${module} using ${sig_key_path}:${dotconfig_sig_hash}"
 	"${sign_binary_path}" \
@@ -423,31 +423,22 @@ sign_module() {
 		"${1}" || die "Signing ${module} failed"
 }
 
-# @FUNCTION: sign_all_modules
+# @FUNCTION: _sign_all_modules
 # @INTERNAL
 # @DESCRIPTION:
 # Signs all unsigned modules
 # Must be called in pkg_preinst.
-sign_all_modules() {
-	debug-print-function ${FUNCNAME} $*
+_sign_all_modules() {
+	debug-print-function ${FUNCNAME} "${@}"
 
-	[ -z "${KV_OBJ}" ] && set_kvobj;
-	require_configured_kernel;
-	check_kernel_built;
+	[[ -z "${KV_OBJ}" ]] && set_kvobj
+	require_configured_kernel
+	check_kernel_built
 
 	local module
-	local modules
-
-	pushd "${ED}" > /dev/null || die
-	modules=$(find "lib/modules/${KV_FULL}" -name "*.${KV_OBJ}" 2>/dev/null)
-	if [[ -n ${modules} ]]; then
-		for module in ${modules}; do
-			sign_module "${module}"
-		done
-	else
-		ewarn 'QA: list of modules to sign is empty, pease report a bug'
-	fi
-	popd > /dev/null || die
+	while read -rd '' module; do
+		_sign_module "${module}"
+	done < <(find "${ED}/lib/modules/${KV_FULL}" -name "*.${KV_OBJ}" -print0)
 }
 
 # internal function
@@ -690,7 +681,7 @@ linux-mod_pkg_setup() {
 	strip_modulenames;
 	[[ -n ${MODULE_NAMES} ]] && check_modules_supported
 	set_kvobj;
-	check_sig_force;
+	_check_sig_force
 	# Commented out with permission from johnm until a fixed version for arches
 	# who intentionally use different kernel and userland compilers can be
 	# introduced - Jason Wever <weeve@gentoo.org>, 23 Oct 2005
@@ -835,15 +826,14 @@ linux-mod_pkg_preinst() {
 
 	[ -d "${D}lib/modules" ] && UPDATE_DEPMOD=true || UPDATE_DEPMOD=false
 	[ -d "${D}lib/modules" ] && UPDATE_MODULEDB=true || UPDATE_MODULEDB=false
-	check_sig_force
-	use module-sign && sign_all_modules
+	_check_sig_force
+	use module-sign && _sign_all_modules
 }
 
 # @FUNCTION: linux-mod_pkg_postinst
 # @DESCRIPTION:
 # It executes /sbin/depmod and adds the package to the /var/lib/module-rebuild/moduledb
 # database (if ${D}/lib/modules is created)"
-# Also signs modules if requested
 linux-mod_pkg_postinst() {
 	debug-print-function ${FUNCNAME} $*
 	[ -n "${MODULES_OPTIONAL_USE}" ] && use !${MODULES_OPTIONAL_USE} && return
