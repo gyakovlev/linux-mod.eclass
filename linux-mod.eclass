@@ -137,10 +137,13 @@
 # @DEFAULT_UNSET
 # @DESCRIPTION:
 # A string, containing absolute path to the private key file.
-# Defaults to value of CONFIG_MODULE_SIG_KEY extracted from .config
+# Defaults to value of CONFIG_MODULE_SIG_KEY extracted from .config if not set by user.
+#
 # Example:
+# @CODE
 # KERNEL_MODULE_SIG_KEY="/secure/location/keys/kernel.pem"
-# Assumes that "/secure/location/keys/kernel.x509" is a matching pubkey.
+# @CODE
+# Assumes that "/secure/location/keys/kernel.x509" public key file exists.
 
 inherit eutils linux-info multilib
 EXPORT_FUNCTIONS pkg_setup pkg_preinst pkg_postinst src_install src_compile pkg_postrm
