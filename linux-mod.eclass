@@ -141,9 +141,9 @@
 #
 # Example:
 # @CODE
-# KERNEL_MODULE_SIG_KEY="/secure/location/keys/kernel.pem"
+# KERNEL_MODULE_SIG_KEY="/secure/location/kernel.pem"
 # @CODE
-# Assumes that "/secure/location/keys/kernel.x509" public key file exists.
+# Assumes that "/secure/location/kernel.x509" public key file exists.
 
 inherit eutils linux-info multilib
 EXPORT_FUNCTIONS pkg_setup pkg_preinst pkg_postinst src_install src_compile pkg_postrm
