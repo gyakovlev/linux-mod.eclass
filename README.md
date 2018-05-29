@@ -15,13 +15,14 @@ You may want to use postsync hook to copy it after each sync.
 
 ## Usage
 
-Configure kernel to sign modules and optionally require module signatures.
-add `module-sign` to your USE flags.
-emerge packages that provide kernel modules.
+- Configure kernel to sign modules and optionally require module signatures.
 
-check that modules are signed
+- add `module-sign` to your USE flags.
 
-```
+- emerge packages that provide kernel modules.
+
+- check that modules are signed
+```sh
 # strings /lib/modules/4.16.12-gentoo/kernel/drivers/net/wireguard.ko  | tail -1
  ~Module signature appended~
  ```
@@ -29,4 +30,5 @@ check that modules are signed
 
 ### More info
 https://bugs.gentoo.org/show_bug.cgi?id=447352
+
 https://archives.gentoo.org/gentoo-dev/message/4b15b1c851f379a1f802e2f2895cdfa8
