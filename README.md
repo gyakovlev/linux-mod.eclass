@@ -4,6 +4,21 @@ An attempt to add module-signing support for 3rd party modules in gentoo.
 
 ## Installation
 
+- Overlay method (preferred)
+
+Assuming you have your own local overlay, create an `eclass` dir
+and place provided linux-mod.eclass there.
+
+Reconfigure default section in repos.conf to look like this
+
+```
+[DEFAULT]
+main-repo = gentoo
+eclass-overrides = nameofyouroverlay
+```
+
+- Overwrite method (not recommended)
+
 ```sh
 wget  -O $(portageq get_repo_path / gentoo)/eclass/linux-mod.eclass https://github.com/gyakovlev/linux-mod.eclass/raw/master/linux-mod.eclass
 ```
