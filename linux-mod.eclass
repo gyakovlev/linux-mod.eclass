@@ -137,7 +137,8 @@
 # @DEFAULT_UNSET
 # @DESCRIPTION:
 # A string, containing absolute path to the private key file.
-# Defaults to value of CONFIG_MODULE_SIG_KEY extracted from .config if not set by user.
+# eclass will use value of CONFIG_MODULE_SIG_KEY extracted from .config 
+# if KERNEL_MODULE_SIG_KEY is not set by user.
 #
 # Example:
 # @CODE
@@ -163,8 +164,10 @@ RDEPEND="${MODULES_OPTIONAL_USE}${MODULES_OPTIONAL_USE:+? (} kernel_linux? ( vir
 DEPEND="${RDEPEND}
     ${MODULES_OPTIONAL_USE}${MODULES_OPTIONAL_USE:+? (}
 	sys-apps/sed
-	module-sign? ( || ( dev-libs/openssl dev-libs/libressl ) )
-	kernel_linux? ( virtual/linux-sources )
+	kernel_linux? ( 
+		virtual/linux-sources virtual/libelf
+		module-sign? ( || ( dev-libs/openssl dev-libs/libressl ) )
+	)
 	${MODULES_OPTIONAL_USE:+)}"
 
 # eclass utilities
@@ -370,7 +373,7 @@ get-KERNEL_CC() {
 # @INTERNAL
 # @DESCRIPTION:
 # Check if kernel requires module signing and die
-# if module is not going to be signed.
+# if modules are not going to be signed.
 _check_sig_force() {
 	debug-print-function ${FUNCNAME} "${@}"
 
@@ -403,7 +406,7 @@ _sign_module() {
 	dotconfig_sig_hash="$(linux_chkconfig_string MODULE_SIG_HASH)"
 	dotconfig_sig_key="$(linux_chkconfig_string MODULE_SIG_KEY)"
 
-	# strip out double quotes, sign-file binary chokes on them
+	# sign-file binary chokes on double quotes
 	dotconfig_sig_hash=${dotconfig_sig_hash//\"/}
 	dotconfig_sig_key=${dotconfig_sig_key//\"/}
 
@@ -429,8 +432,8 @@ _sign_module() {
 # @FUNCTION: _sign_all_modules
 # @INTERNAL
 # @DESCRIPTION:
-# Signs all unsigned modules
-# Must be called in pkg_preinst.
+# Signs all unsigned modules it finds in installation image
+# Called by linux-mod_pkg_preinst
 _sign_all_modules() {
 	debug-print-function ${FUNCNAME} "${@}"
 
